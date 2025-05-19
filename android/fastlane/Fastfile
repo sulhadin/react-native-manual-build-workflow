@@ -1,0 +1,19 @@
+default_platform(:android)
+
+platform :android do
+  desc "Deploy a new version to Firebase"
+  lane :staging do
+    gradle(
+        task: "clean assembleStaging", # assembleDebug | assembleRelease
+    )
+
+    release = firebase_app_distribution(
+        app: ENV["FIREBASE_ANDROID_APP_ID"],
+        service_credentials_json_data: ENV["CREDENTIAL_FILE_CONTENT"],
+        android_artifact_type: "APK",
+        android_artifact_path: "./app/build/outputs/apk/staging/app-staging.apk",
+        groups: "test-internal",
+        release_notes: ENV["RELEASE_NOTES"],
+    )
+  end
+end

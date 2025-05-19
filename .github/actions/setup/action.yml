@@ -1,0 +1,57 @@
+name: 'Setup Environment'
+description: 'Sets up Node.js, Yarn, and installs dependencies'
+
+inputs:
+  npm-auth-token:
+    required: true
+    description: 'NPM auth token for GitHub packages'
+  branch:
+    required: true
+    description: 'Target branch'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.branch }}
+        fetch-depth: 0
+
+    - name: Sync with target branch
+      shell: bash
+      run: |
+        echo "Checkout: ${{ inputs.branch }}"
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version-file: '.nvmrc'
+    - name: Setup .yarnrc.yml
+      shell: bash
+      run: |
+        # Create .yarnrc.yml with auth token
+        cat << EOF > .yarnrc.yml
+        nodeLinker: node-modules
+        yarnPath: .yarn/releases/yarn-3.8.7.cjs
+        
+        #!Uncomment if you have a private package in github registry.
+        #enableNetwork: true
+        #npmScopes:
+        #  your-org:
+        #    npmRegistryServer: "https://npm.pkg.github.com"
+        #    npmAuthToken: "${{ inputs.npm-auth-token }}"
+        EOF
+    - name: Setup Yarn
+      shell: bash
+      run: |
+        corepack enable
+        yarn set version 4.6.0
+        yarn --version
+        ls -la ./
+        cat .yarnrc.yml
+    - name: Install Dependencies
+      shell: bash
+      run: |
+        yarn --version
+        yarn config set enableNetwork true
+        yarn install --immutable --inline-builds

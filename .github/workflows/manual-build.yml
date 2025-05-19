@@ -1,0 +1,242 @@
+name: Daily Build
+on:
+  #schedule: #If you want a daily build, use this.
+  #  - cron: '0 16 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Target branch (enter branch name)'
+        required: true
+        default: 'development'
+        type: string
+      ios:
+        description: 'Include IOS'
+        required: false
+        default: true
+        type: boolean
+      android:
+        description: 'Include Android'
+        required: false
+        default: true
+        type: boolean
+      only-bump-build:
+        description: '(!) Only bump build'
+        required: false
+        default: false
+        type: boolean
+      force-build:
+        description: '(!) Force build (release notes are optional, so build anyway!)'
+        required: false
+        default: false
+        type: boolean
+env:
+  TARGET_BRANCH: ${{ github.event.inputs.branch || 'development' }}
+  TZ: Europe/Istanbul
+permissions: write-all
+jobs:
+  update-version:
+    if: needs.release-notes.outputs.pr_list != '' || github.event.inputs.force-build == 'true'
+    runs-on: macos-latest
+    environment: staging
+    env:
+      MERGED_SINCE: ${{ needs.date.outputs.since }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.GITHUB_DEPLOY_KEY }}
+      - name: 'Semantic Versioning'
+        run: |
+          # Get the version from package.json
+          version=$(jq -r '.version' package.json)
+          
+          # Check if only-bump-build is true or force-build is true
+          if [ "${{ github.event.inputs.only-bump-build }}" = "true" ] || [ "${{ github.event.inputs.force-build }}" = "true" ]; then
+            new_version=$version
+            echo "::notice::Only bump build is true or force build is true, keeping version: $new_version"
+          else
+            new_version=$(sh your-semantic-versioning-strategy.sh "params here...")
+          fi
+          
+          # Output the new version
+          echo "::notice::New version: $new_version (old one is $version) in branch:$TARGET_BRANCH"
+          
+          # Validate using node if you need.
+          #if ! node -p "'$new_version'.match(/^\d+\.\d+\.\d+$/)?true:false" | grep -q "true"; then
+          #  echo "::error::Invalid semantic version format: $new_version"
+          #  exit 1
+          #fi
+
+          # Bump version
+          sh update-versioning.sh $new_version
+          echo "::notice::Version bumped: $new_version"
+
+          # Configure git, add and commit, pull any new changes (with rebase) and push
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git add .
+          git commit -m "bump react-native-manual-build-workflow from $version to $new_version"
+          git pull --rebase origin $TARGET_BRANCH
+          git push origin HEAD:$TARGET_BRANCH
+          echo "::notice::New version: $new_version pushed to $TARGET_BRANCH"
+  build-and-deploy-ios:
+    if: (github.event.inputs.force-build == 'true') && (github.event_name == 'schedule' || github.event.inputs.ios == 'true')
+    needs: [update-version]
+    runs-on: macos-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          npm-auth-token: ${{ secrets.NPM_AUTH_TOKEN }}
+          branch: ${{env.TARGET_BRANCH}}
+      - name: Create .env file
+        run: |
+          cat << EOF > .env
+          SOME_ENV=${{ vars.SOME_ENV }}
+          EOF
+      - name: Setup extra properties
+        run: |
+          # Create iOS sentry.properties
+          cat << EOF > ios/sentry.properties
+          defaults.project=${{ vars.SENTRY_PROJECT }}
+          auth.token=${{ secrets.SENTRY_AUTH_TOKEN }}
+          EOF
+
+          # Decode and create necessary ios files
+          echo "${{ secrets.IOS_SECRETS_CONFIG }}" | base64 -d > ios/Secrets.xcconfig
+          echo "${{ secrets.IOS_SECRETS_GOOGLE_SERVICE }}" | base64 -d > ios/GoogleService-Info.plist
+      - name: Install Keys
+        env:
+          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }} # Get from https://appstoreconnect.apple.com/access/integrations/api
+          APP_STORE_CONNECT_AUTH_KEY: ${{ secrets.APP_STORE_CONNECT_AUTH_KEY }} # Get from https://appstoreconnect.apple.com/access/integrations/api
+          IOS_PROFILE_STAGING: ${{ secrets.IOS_PROFILE_STAGING }} # Get from https://developer.apple.com/account/resources/profiles/list
+          IOS_PROFILE_STAGING_OTHER: ${{ secrets.IOS_PROFILE_STAGING_OTHER }} # Get from https://developer.apple.com/account/resources/profiles/list
+          IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }} # Export it from mac keychain access.
+          P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }} # Should match when export p12 in your Mac.
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }} # Random set.
+        run: |
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -l ~/Library/Keychains/build.keychain
+
+          # Import certificate
+          echo -n "$IOS_CERTIFICATE_P12" | base64 --decode --output certificate.p12
+          security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          # Import Apple Store Connect
+          echo -n "$APP_STORE_CONNECT_AUTH_KEY" | base64 --decode > ./AuthKey.p8
+          ls
+          # Import Profiles
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo -n "$IOS_PROFILE_STAGING" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/staging.mobileprovision
+          echo -n "$IOS_PROFILE_STAGING_OTHER" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/staging_other.mobileprovision
+      - name: Reset Cache and Install iOS dependencies
+        run: |
+          cd ios
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          pod install --repo-update
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+      - name: Build and deploy
+        working-directory: './ios'
+        env:
+          FIREBASE_IOS_APP_ID: ${{ secrets.FIREBASE_IOS_APP_ID }}
+          CREDENTIAL_FILE_CONTENT: ${{ secrets.CREDENTIAL_FILE_CONTENT }}
+        run: |
+          bundle install
+          bundle exec fastlane ios staging
+  build-and-deploy-android:
+    if: (github.event.inputs.force-build == 'true') && (github.event_name == 'schedule' || github.event.inputs.android == 'true')
+    needs: [update-version]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          npm-auth-token: ${{ secrets.NPM_AUTH_TOKEN }}
+          branch: ${{env.TARGET_BRANCH}}
+      - name: Create .env file
+        run: |
+          cat << EOF > .env
+          SOME_ENV=${{ vars.SOME_ENV }}
+          EOF
+      - name: Setup extra properties
+        run: |
+          # Create Android sentry.properties
+          cat << EOF > android/sentry.properties
+          defaults.project=${{ vars.SENTRY_PROJECT }}
+          auth.token=${{ secrets.SENTRY_AUTH_TOKEN }}
+          EOF
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - name: Setup Android Signing
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > android/app/debug.keystore
+      - name: Setup Configuration Files
+        run: |
+          # Create necessary directories
+          mkdir -p android/app/src/main/res/values
+          # Decode and create google-services.json
+          echo "${{ secrets.GOOGLE_SERVICES }}" | base64 -d > android/app/google-services.json
+
+          # Decode and create strings.xml
+          echo "${{ secrets.GOOGLE_STRINGS }}" | base64 -d > android/app/src/main/res/values/strings.xml
+
+          # Add keystore credentials
+          echo "ANDROID_RELEASE_STORE_FILE=${{ vars.ANDROID_RELEASE_STORE_FILE }}" >> android/gradle.properties
+          echo "ANDROID_RELEASE_KEY_ALIAS=${{ vars.ANDROID_RELEASE_KEY_ALIAS }}" >> android/gradle.properties
+          echo "ANDROID_RELEASE_STORE_PASSWORD=${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}" >> android/gradle.properties
+          echo "ANDROID_RELEASE_KEY_PASSWORD=${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}" >> android/gradle.properties
+
+          # Verify files exist
+          ls -la android/app/
+          ls -la android/app/src/main/res/values/
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+      - name: Build and deploy
+        working-directory: './android'
+        env:
+          FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+          CREDENTIAL_FILE_CONTENT: ${{ secrets.CREDENTIAL_FILE_CONTENT }}
+          RELEASE_NOTES: ${{ env.RELEASE_NOTES }}
+        run: |
+          chmod +x ./gradlew
+          bundle install
+          bundle exec fastlane android staging
+
+  slack-notification:
+    runs-on: macos-latest
+    needs: [build-and-deploy-ios, build-and-deploy-android] #
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+      - name: Use PR List
+        run: |
+          RELEASE_NOTES="Release notes"
+          echo "RELEASE_NOTES=$ESCAPED" >> $GITHUB_ENV
+      - name: Build and deploy
+        env:
+          RELEASE_NOTES: ${{ env.RELEASE_NOTES }}
+          SLACK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+        run: |
+          bundle install
+          bundle exec fastlane ios_android staging_versioning
+          echo "::notice::Slack notification sent."

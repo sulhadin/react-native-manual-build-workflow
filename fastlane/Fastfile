@@ -1,0 +1,28 @@
+platform :ios_android do
+  lane :staging_versioning do
+    androidVersion = android_get_version_name(
+      gradle_file: "./android/app/build.gradle" # optional
+    )
+
+    androidBuildNumber = android_get_version_code(
+      gradle_file: "./android/app/build.gradle"
+    )
+
+    iosVersion = get_version_number(
+     xcodeproj: "./ios/ReactNativeManualBuildWorkflow.xcodeproj",
+     target: "ReactNativeManualBuildWorkflow",
+     configuration: "Staging"
+    )
+
+    iosBuildNumber = get_build_number(
+     xcodeproj: "./ios/ReactNativeManualBuildWorkflow.xcodeproj",
+    )
+
+    slack(
+      message: "🚀 *New Firebase Build!*\nRelease Notes:\n #{ENV["RELEASE_NOTES"]}",
+      slack_url: ENV["SLACK_RELEASE_WEBHOOK"],
+      default_payloads: [:release_date],
+      payload: {"Android Build": "#{androidVersion} (#{androidBuildNumber})","IOS Build": "#{iosVersion}  (#{iosBuildNumber})" }
+     )
+  end
+end

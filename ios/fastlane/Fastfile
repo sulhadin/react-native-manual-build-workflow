@@ -1,0 +1,28 @@
+platform :ios do
+  lane :staging do
+    build_ios_app(
+      workspace: "./ReactNativeManualBuildWorkflow.xcworkspace",
+      scheme: "ReactNativeManualBuildWorkflow",
+      configuration: "Staging",
+      export_method: "ad-hoc",
+      output_directory: "./build",
+      output_name: "ReactNativeManualBuildWorkflow.ipa",
+      clean: true,
+      codesigning_identity: "iPhone Distribution",
+       export_options: {
+          provisioningProfiles: {
+            "com.proj.staging" => "Staging PP",
+            "com.proj.staging.other" => "Staging Other PP",
+          }
+       }
+    )
+
+      release = firebase_app_distribution(
+          app: ENV["FIREBASE_IOS_APP_ID"],
+          service_credentials_json_data: ENV["CREDENTIAL_FILE_CONTENT"], #Firebase credential file content
+          ipa_path: "./build/ReactNativeManualBuildWorkflow.ipa",
+          groups: "test-internal",
+          release_notes: ENV["RELEASE_NOTES"]
+      )
+  end
+end

@@ -1,97 +1,74 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# React Native Manual Build Workflow
 
-# Getting Started
+## Overview
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+This GitHub Actions workflow automates the build and deployment process for iOS and Android mobile applications. It provides flexible options for manual triggering and can also be scheduled for daily builds.
 
-## Step 1: Start Metro
+## Key Strategy: Manual Profile Management
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### Why Manual Profile Management?
+- 🔧 Granular control over provisioning profiles
+- 🛡️ Avoid common Fastlane provisioning complications
+- 🔒 Secure, step-by-step certificate and profile handling
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Key Features
 
-```sh
-# Using npm
-npm start
+- Semantic versioning of the application
+- Conditional builds for iOS and Android
+- Manual or scheduled workflow execution
+- Staged deployment to staging environment
+- Automated release notes generation
+- Slack notification after successful build
 
-# OR using Yarn
-yarn start
-```
+## Workflow Inputs
 
-## Step 2: Build and run your app
+When manually triggering the workflow, you can configure:
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+- **Branch**: Target branch for the build (default: 'development')
+- **iOS**: Include iOS build (default: true)
+- **Android**: Include Android build (default: true)
+- **Only Bump Build**: Increment build number without major changes
+- **Force Build**: Proceed with build even without release notes
 
-### Android
+## Build Process
 
-```sh
-# Using npm
-npm run android
+### Version Management
+- Retrieves current version from `package.json`
+- Applies semantic versioning strategy
+- Updates version across the project
+- Commits and pushes version changes to the specified branch
 
-# OR using Yarn
-yarn android
-```
+### iOS Build
+- Sets up development environment
+- Configures code signing and provisioning profiles
+- Installs dependencies
+- Builds and deploys to staging using Fastlane
 
-### iOS
+### Android Build
+- Sets up Java and Android build tools
+- Configures signing and configuration files
+- Installs dependencies
+- Builds and deploys to staging using Fastlane
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+### Notifications
+- Sends build status notification to Slack after completion
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+## Prerequisites
 
-```sh
-bundle install
-```
+- GitHub Actions enabled
+- Configured secrets and variables
+- Ruby and Fastlane installed
+- Appropriate Apple and Google developer accounts
 
-Then, and every time you update your native dependencies, run:
+## Security
 
-```sh
-bundle exec pod install
-```
+The workflow uses base64 encoded secrets for:
+- Certificates
+- Provisioning profiles
+- Keystore files
+- Configuration files
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Notes
 
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- Requires careful management of secrets
+- Recommended to use in conjunction with proper CI/CD practices
